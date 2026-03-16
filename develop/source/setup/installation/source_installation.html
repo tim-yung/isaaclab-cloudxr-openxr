@@ -1178,41 +1178,42 @@ using pip (with <code class="docutils literal notranslate"><span class="pre">--e
 </div>
 </div>
 </div>
-<p>By default, the above will install <strong>all</strong> the learning framework and all Isaac Lab submodules (under <code class="docutils literal notranslate"><span class="pre">source/isaaclab</span></code>). Available RL frameworks are:
-<code class="docutils literal notranslate"><span class="pre">rl_games</span></code>, <code class="docutils literal notranslate"><span class="pre">rsl_rl</span></code>, <code class="docutils literal notranslate"><span class="pre">sb3</span></code>, <code class="docutils literal notranslate"><span class="pre">skrl</span></code>, <code class="docutils literal notranslate"><span class="pre">robomimic</span></code>.</p>
-<p>If you want to install only a specific framework, you can pass the name of the framework
-as an argument. For example, to install only the <code class="docutils literal notranslate"><span class="pre">rl_games</span></code> framework, you can run:</p>
+<p>By default, the above will install <strong>all</strong> Isaac Lab submodules (under <code class="docutils literal notranslate"><span class="pre">source/isaaclab</span></code>).
+To install only specific Isaac Lab submodules, pass a comma-separated list of submodule names. The available
+Isaac Lab submodules are: <code class="docutils literal notranslate"><span class="pre">assets</span></code>, <code class="docutils literal notranslate"><span class="pre">contrib</span></code>, <code class="docutils literal notranslate"><span class="pre">mimic</span></code>, <code class="docutils literal notranslate"><span class="pre">newton</span></code>, <code class="docutils literal notranslate"><span class="pre">ov</span></code>, <code class="docutils literal notranslate"><span class="pre">physx</span></code>, <code class="docutils literal notranslate"><span class="pre">rl</span></code>, <code class="docutils literal notranslate"><span class="pre">tasks</span></code>,
+<code class="docutils literal notranslate"><span class="pre">teleop</span></code>, <code class="docutils literal notranslate"><span class="pre">visualizers</span></code>. Available RL frameworks are: <code class="docutils literal notranslate"><span class="pre">rl_games</span></code>, <code class="docutils literal notranslate"><span class="pre">rsl_rl</span></code>, <code class="docutils literal notranslate"><span class="pre">sb3</span></code>, <code class="docutils literal notranslate"><span class="pre">skrl</span></code>, <code class="docutils literal notranslate"><span class="pre">robomimic</span></code>.</p>
+<p>For example, to install a small subset of submodules:</p>
 <div class="sd-tab-set docutils">
 <input checked="checked" id="sd-tab-item-24" name="sd-tab-set-12" type="radio">
 <label class="sd-tab-label" data-sync-group="os" data-sync-id="linux" for="sd-tab-item-24">
 <i class="fa-brands fa-linux"></i> Linux</label><div class="sd-tab-content docutils">
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>./isaaclab.sh<span class="w"> </span>--install<span class="w"> </span>rl_games<span class="w">  </span><span class="c1"># or &quot;./isaaclab.sh -i rl_games&quot;</span>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>./isaaclab.sh<span class="w"> </span>--install<span class="w"> </span>physx,newton,assets,rl<span class="o">[</span>rsl_rl<span class="o">]</span>,tasks,ov<span class="w">  </span><span class="c1"># or &quot;./isaaclab.sh -i physx,newton,assets,rl[rsl_rl],tasks,ov&quot;</span>
 </pre></div>
 </div>
 </div>
 <input id="sd-tab-item-25" name="sd-tab-set-12" type="radio">
 <label class="sd-tab-label" data-sync-group="os" data-sync-id="windows" for="sd-tab-item-25">
 <i class="fa-brands fa-windows"></i> Windows</label><div class="sd-tab-content docutils">
-<div class="highlight-batch notranslate"><div class="highlight"><pre><span></span>isaaclab.bat --install rl_games :: or <span class="s2">&quot;isaaclab.bat -i rl_games&quot;</span>
+<div class="highlight-batch notranslate"><div class="highlight"><pre><span></span>isaaclab.bat --install physx,newton,assets,rl[rsl_rl],tasks,ov :: or <span class="s2">&quot;isaaclab.bat -i physx,newton,assets,rl[rsl_rl],tasks,ov&quot;</span>
 </pre></div>
 </div>
 </div>
 </div>
-<p>To install only specific Isaac Lab submodules, pass a comma-separated list of submodule names. The available
-Isaac Lab submodules are: <code class="docutils literal notranslate"><span class="pre">assets</span></code>, <code class="docutils literal notranslate"><span class="pre">contrib</span></code>, <code class="docutils literal notranslate"><span class="pre">mimic</span></code>, <code class="docutils literal notranslate"><span class="pre">newton</span></code>, <code class="docutils literal notranslate"><span class="pre">ov</span></code>, <code class="docutils literal notranslate"><span class="pre">physx</span></code>, <code class="docutils literal notranslate"><span class="pre">rl</span></code>, <code class="docutils literal notranslate"><span class="pre">tasks</span></code>,
-<code class="docutils literal notranslate"><span class="pre">teleop</span></code>, <code class="docutils literal notranslate"><span class="pre">visualizers</span></code>. For example, to install only the <code class="docutils literal notranslate"><span class="pre">mimic</span></code> and <code class="docutils literal notranslate"><span class="pre">assets</span></code> submodules:</p>
+<p>To install specific visualizer, pass a comma-separated list of supported visualizers,
+or <code class="docutils literal notranslate"><span class="pre">all</span></code> to install all available options: <code class="docutils literal notranslate"><span class="pre">newton</span></code>, <code class="docutils literal notranslate"><span class="pre">rerun</span></code>, <code class="docutils literal notranslate"><span class="pre">viser</span></code>, <code class="docutils literal notranslate"><span class="pre">kit</span></code>. Note when following the
+default installation, all visualizers are installed.</p>
 <div class="sd-tab-set docutils">
 <input checked="checked" id="sd-tab-item-26" name="sd-tab-set-13" type="radio">
 <label class="sd-tab-label" data-sync-group="os" data-sync-id="linux" for="sd-tab-item-26">
 <i class="fa-brands fa-linux"></i> Linux</label><div class="sd-tab-content docutils">
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>./isaaclab.sh<span class="w"> </span>--install<span class="w"> </span>physx,assets,rl,tasks<span class="w">  </span><span class="c1"># or &quot;./isaaclab.sh -i physx,assets,rl,tasks&quot;</span>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>./isaaclab.sh<span class="w"> </span>--install<span class="w"> </span>visualizers<span class="o">[</span>rerun<span class="o">]</span><span class="w">  </span><span class="c1"># or &quot;./isaaclab.sh -i visualizers[rerun]&quot;</span>
 </pre></div>
 </div>
 </div>
 <input id="sd-tab-item-27" name="sd-tab-set-13" type="radio">
 <label class="sd-tab-label" data-sync-group="os" data-sync-id="windows" for="sd-tab-item-27">
 <i class="fa-brands fa-windows"></i> Windows</label><div class="sd-tab-content docutils">
-<div class="highlight-batch notranslate"><div class="highlight"><pre><span></span>isaaclab.bat --install physx,assets,rl,tasks :: or <span class="s2">&quot;isaaclab.bat -i physx,assets,rl,tasks&quot;</span>
+<div class="highlight-batch notranslate"><div class="highlight"><pre><span></span>isaaclab.bat --install visualizers[rerun] :: or <span class="s2">&quot;isaaclab.bat -i visualizers[rerun]&quot;</span>
 </pre></div>
 </div>
 </div>
