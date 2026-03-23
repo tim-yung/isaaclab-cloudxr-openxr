@@ -135,9 +135,15 @@ class InHandManipulationEnv(DirectRLEnv):
 
     def _get_observations(self) -> dict:
         if self.cfg.asymmetric_obs:
-            self.fingertip_force_sensors = wp.to_torch(self.hand.data.body_incoming_joint_wrench_b)[
-                :, self.finger_bodies
-            ]
+            # Newton does not implement body_incoming_joint_wrench_b; fall back to zeros.
+            try:
+                self.fingertip_force_sensors = wp.to_torch(self.hand.data.body_incoming_joint_wrench_b)[
+                    :, self.finger_bodies
+                ]
+            except NotImplementedError:
+                self.fingertip_force_sensors = torch.zeros(
+                    self.num_envs, len(self.finger_bodies), 6, dtype=torch.float32, device=self.device
+                )
 
         if self.cfg.obs_type == "openai":
             obs = self.compute_reduced_observations()
@@ -387,9 +393,7 @@ def randomize_rotation(rand0, rand1, x_unit_tensor, y_unit_tensor):
 def rotation_distance(object_rot, target_rot):
     # Orientation alignment for the cube in hand and goal cube
     quat_diff = quat_mul(object_rot, quat_conjugate(target_rot))
-    return 2.0 * torch.asin(
-        torch.clamp(torch.linalg.norm(quat_diff[:, 1:4], ord=2, dim=-1), max=1.0)
-    )  # changed quat convention
+    return 2.0 * torch.asin(torch.clamp(torch.linalg.norm(quat_diff[:, 0:3], ord=2, dim=-1), max=1.0))
 
 
 @torch.jit.script

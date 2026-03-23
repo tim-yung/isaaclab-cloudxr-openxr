@@ -27,8 +27,13 @@ from isaaclab_assets.robots.shadow_hand import SHADOW_HAND_CFG
 
 
 @configclass
-class EventCfg:
-    """Configuration for randomization."""
+class NewtonEventCfg:
+    """Event randomization config for the Newton physics backend.
+
+    Includes joint-parameter, mass, and gravity randomization.
+    Material and tendon randomization are omitted: Newton does not expose
+    per-body friction-material buckets or fixed-tendon APIs.
+    """
 
     robot_joint_stiffness_and_damping = EventTerm(
         func=mdp.randomize_actuator_gains,
@@ -42,19 +47,6 @@ class EventCfg:
             "distribution": "log_uniform",
         },
     )
-    robot_joint_pos_limits = EventTerm(
-        func=mdp.randomize_joint_parameters,
-        min_step_count_between_reset=720,
-        mode="reset",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
-            "lower_limit_distribution_params": (0.00, 0.01),
-            "upper_limit_distribution_params": (0.00, 0.01),
-            "operation": "add",
-            "distribution": "gaussian",
-        },
-    )
-
     object_scale_mass = EventTerm(
         func=mdp.randomize_rigid_body_mass,
         min_step_count_between_reset=720,
@@ -64,6 +56,7 @@ class EventCfg:
             "mass_distribution_params": (0.5, 1.5),
             "operation": "scale",
             "distribution": "uniform",
+            "recompute_inertia": False,
         },
     )
 
@@ -127,7 +120,7 @@ class PhysxEventCfg:
 @configclass
 class ShadowHandEventCfg(PresetCfg):
     physx = PhysxEventCfg()
-    newton = EventCfg()
+    newton = NewtonEventCfg()
     default = physx
 
 
@@ -162,7 +155,7 @@ class ShadowHandRobotCfg(PresetCfg):
             # discards the root body's native USD orientation, so we must re-apply it here as a
             # spawn rotation. PhysX or USD does not have this issue. Remove once Newton fixes root joint
             # transform handling in import_usd.py.
-            rot=(-0.7071, 0.0, 0.0, 0.7071),
+            rot=(0.0, 0.0, 0.0, 1.0),
             joint_pos={".*": 0.0},
         ),
         actuators={
@@ -232,12 +225,29 @@ class ObjectCfg(PresetCfg):
             scale=(0.9, 0.9, 0.9),
         ),
         init_state=ArticulationCfg.InitialStateCfg(
-            pos=(0.0, 0.36, 0.535), rot=(0.0, 0.0, 0.0, 1.0), joint_pos={}, joint_vel={}
+            pos=(0.0, -0.36, 0.535), rot=(0.0, 0.0, 0.0, 1.0), joint_pos={}, joint_vel={}
         ),
         actuators={},
         articulation_root_prim_path="",
     )
     default = physx
+
+
+@configclass
+class ShadowHandSceneCfg(PresetCfg):
+    """Scene configuration presets for the shadow hand environment.
+
+    PhysX supports ``clone_in_fabric=True`` for faster scene cloning via the Fabric layer.
+    Newton does not support Fabric cloning, so ``clone_in_fabric`` must be ``False``.
+    """
+
+    physx: InteractiveSceneCfg = InteractiveSceneCfg(
+        num_envs=8192, env_spacing=0.75, replicate_physics=True, clone_in_fabric=True
+    )
+    newton: InteractiveSceneCfg = InteractiveSceneCfg(
+        num_envs=8192, env_spacing=0.75, replicate_physics=True, clone_in_fabric=False
+    )
+    default: InteractiveSceneCfg = physx
 
 
 @configclass
@@ -257,8 +267,6 @@ class PhysicsCfg(PresetCfg):
             cone="elliptic",
             update_data_interval=2,
             iterations=100,
-            ls_iterations=15,
-            ls_parallel=False,
         ),
         num_substeps=2,
         debug_mode=False,
@@ -328,10 +336,8 @@ class ShadowHandEnvCfg(DirectRLEnvCfg):
             )
         },
     )
-    # scene
-    scene: InteractiveSceneCfg = InteractiveSceneCfg(
-        num_envs=8192, env_spacing=0.75, replicate_physics=True, clone_in_fabric=True
-    )
+    # scene — use ShadowHandSceneCfg so that presets=newton disables clone_in_fabric automatically
+    scene: ShadowHandSceneCfg = ShadowHandSceneCfg()
 
     # reset
     reset_position_noise = 0.01  # range of position at reset

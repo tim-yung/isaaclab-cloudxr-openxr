@@ -33,8 +33,8 @@ from isaaclab_tasks.manager_based.locomanipulation.pick_place.locomanipulation_g
 from .locomanipulation_sdg_env import LocomanipulationSDGEnv
 from .locomanipulation_sdg_env_cfg import LocomanipulationSDGEnvCfg, LocomanipulationSDGRecorderManagerCfg
 
-NUM_FORKLIFTS = 6
-NUM_BOXES = 12
+NUM_FORKLIFTS = 0
+NUM_BOXES = 0
 
 
 @configclass
@@ -73,7 +73,6 @@ class G1LocomanipulationSDGSceneCfg(LocomanipulationG1SceneCfg):
             ),
             spawn=UsdFileCfg(
                 usd_path=background_usd_path,
-                rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
             ),
         )
 
@@ -129,7 +128,7 @@ class G1LocomanipulationSDGEnvCfg(LocomanipulationG1EnvCfg, LocomanipulationSDGE
 
     # Scene settings
     scene: G1LocomanipulationSDGSceneCfg = G1LocomanipulationSDGSceneCfg(
-        num_envs=1, env_spacing=2.5, replicate_physics=True
+        num_envs=1, env_spacing=2.5, replicate_physics=False
     )
     recorders: LocomanipulationSDGRecorderManagerCfg = LocomanipulationSDGRecorderManagerCfg()
     observations: G1LocomanipulationSDGObservationsCfg = G1LocomanipulationSDGObservationsCfg()
@@ -169,12 +168,12 @@ class G1LocomanipulationSDGEnv(LocomanipulationSDGEnv):
         if cfg.background_usd_path is not None:
             self._num_forklifts = 0
             self._num_boxes = 0
-            remove_virtual_ground = True
+            set_ground_invisible = True
             cfg.scene.add_background_asset(cfg.background_usd_path)
         else:
             self._num_forklifts = NUM_FORKLIFTS
             self._num_boxes = NUM_BOXES
-            remove_virtual_ground = False
+            set_ground_invisible = False
 
         if cfg.high_res_video:
             cfg.scene.add_robot_pov_cam(540, 960)
@@ -184,8 +183,8 @@ class G1LocomanipulationSDGEnv(LocomanipulationSDGEnv):
         cfg.scene.add_forklifts(self._num_forklifts)
         cfg.scene.add_boxes(self._num_boxes)
 
-        if remove_virtual_ground:
-            delattr(cfg.scene, "ground")
+        if set_ground_invisible:
+            cfg.scene.ground.spawn.visible = False
 
         super().__init__(cfg)
         self.sim.set_camera_view([10.5, 10.5, 10.5], [0.0, 0.0, 0.5])

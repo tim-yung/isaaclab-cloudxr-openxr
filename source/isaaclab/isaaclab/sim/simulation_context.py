@@ -21,19 +21,23 @@ from pxr import Gf, Usd, UsdGeom, UsdPhysics, UsdUtils
 import isaaclab.sim as sim_utils
 import isaaclab.sim.utils.stage as stage_utils
 from isaaclab.app.settings_manager import SettingsManager
-from isaaclab.physics import PhysicsManager
+from isaaclab.physics import BaseSceneDataProvider, PhysicsManager, SceneDataProvider
+from isaaclab.physics.scene_data_requirements import (
+    SceneDataRequirement,
+    VisualizerPrebuiltArtifacts,
+    resolve_scene_data_requirements,
+)
 from isaaclab.sim.utils import create_new_stage
 from isaaclab.utils.version import has_kit
-from isaaclab.visualizers import KitVisualizerCfg, NewtonVisualizerCfg, RerunVisualizerCfg, Visualizer
+from isaaclab.visualizers.base_visualizer import BaseVisualizer
 
-from .scene_data_providers import SceneDataProvider
 from .simulation_cfg import SimulationCfg
 from .spawners import DomeLightCfg, GroundPlaneCfg
 
 logger = logging.getLogger(__name__)
 
-# Visualizer type names (CLI and config). App launcher stores --visualizer a b c as space-separated.
-_VISUALIZER_TYPES = ("newton", "rerun", "kit")
+# Visualizer type names (CLI and config). App launcher parses CSV and stores as a space-separated setting.
+_VISUALIZER_TYPES = ("newton", "rerun", "viser", "kit")
 
 
 class SettingsHelper:
@@ -138,6 +142,15 @@ class SimulationContext:
 
         # Initialize USD physics scene and physics manager
         self._init_usd_physics_scene()
+
+        # Normalize "cuda" -> "cuda:<id>" now that the USD physics scene is initialized
+        # and /physics/cudaDevice is available. Update cfg.device in-place so all
+        # downstream code (physics backends, assets, sensors) sees a consistent value.
+        if "cuda" in self.cfg.device and ":" not in self.cfg.device:
+            cuda_device = self.get_setting("/physics/cudaDevice")
+            device_id = max(0, int(cuda_device) if cuda_device is not None else 0)
+            self.cfg.device = f"cuda:{device_id}"
+
         # Set default physics backend if not specified
         if self.cfg.physics is None:
             from isaaclab_physx.physics import PhysxCfg
@@ -154,8 +167,10 @@ class SimulationContext:
         self._apply_render_cfg_settings()
 
         # Initialize visualizer state (provider/visualizers are created lazily during initialize_visualizers()).
-        self._scene_data_provider: SceneDataProvider | None = None
-        self._visualizers: list[Visualizer] = []
+        self._scene_data_provider: BaseSceneDataProvider | None = None
+        self._visualizers: list[BaseVisualizer] = []
+        self._scene_data_requirements = SceneDataRequirement()
+        self._visualizer_prebuilt_artifact: VisualizerPrebuiltArtifacts | None = None
         self._visualizer_step_counter = 0
         # Default visualization dt used before/without visualizer initialization.
         physics_dt = getattr(self.cfg.physics, "dt", None)
@@ -164,6 +179,7 @@ class SimulationContext:
         # Cache commonly-used settings (these don't change during runtime)
         self._has_gui = bool(self.get_setting("/isaaclab/has_gui"))
         self._has_offscreen_render = bool(self.get_setting("/isaaclab/render/offscreen"))
+        self._xr_enabled = bool(self.get_setting("/isaaclab/xr/enabled"))
         # Note: has_rtx_sensors is NOT cached because it changes when Camera sensors are created
 
         # Simulation state
@@ -323,12 +339,13 @@ class SimulationContext:
 
     @property
     def is_rendering(self) -> bool:
-        """Returns whether rendering is active (GUI, RTX sensors, or visualizers requested)."""
+        """Returns whether rendering is active (GUI, RTX sensors, visualizers, or XR)."""
         return (
             self._has_gui
             or self._has_offscreen_render
             or self.get_setting("/isaaclab/render/rtx_sensors")
-            or bool(self.get_setting("/isaaclab/visualizer"))
+            or bool(self.resolve_visualizer_types())
+            or self._xr_enabled
         )
 
     def get_physics_dt(self) -> float:
@@ -336,20 +353,45 @@ class SimulationContext:
         return self.physics_manager.get_physics_dt()
 
     def _create_default_visualizer_configs(self, requested_visualizers: list[str]) -> list:
-        """Create default visualizer configs for requested types."""
+        """Create default visualizer configs for requested types.
+
+        Loads only the requested visualizer submodule (e.g. isaaclab_visualizers.rerun)
+        so dependencies for other backends are not imported.
+        """
+        import importlib
+
         default_configs = []
+        cfg_class_names = {
+            "kit": "KitVisualizerCfg",
+            "newton": "NewtonVisualizerCfg",
+            "rerun": "RerunVisualizerCfg",
+            "viser": "ViserVisualizerCfg",
+        }
         for viz_type in requested_visualizers:
             try:
-                if viz_type == "newton":
-                    default_configs.append(NewtonVisualizerCfg())
-                elif viz_type == "rerun":
-                    default_configs.append(RerunVisualizerCfg())
-                elif viz_type == "kit":
-                    default_configs.append(KitVisualizerCfg())
-                else:
+                if viz_type not in _VISUALIZER_TYPES:
                     logger.warning(
                         f"[SimulationContext] Unknown visualizer type '{viz_type}' requested. "
                         f"Valid types: {', '.join(repr(t) for t in _VISUALIZER_TYPES)}. Skipping."
+                    )
+                    continue
+                mod = importlib.import_module(f"isaaclab_visualizers.{viz_type}")
+                cfg_cls = getattr(mod, cfg_class_names[viz_type])
+                default_configs.append(cfg_cls())
+            except (ImportError, ModuleNotFoundError) as exc:
+                # isaaclab_visualizers is optional; log once at warning level
+                if "isaaclab_visualizers" in str(exc):
+                    logger.warning(
+                        "[SimulationContext] Visualizer '%s' skipped: isaaclab_visualizers is not installed. "
+                        "Install with: pip install isaaclab_visualizers[%s]",
+                        viz_type,
+                        viz_type,
+                    )
+                else:
+                    logger.error(
+                        "[SimulationContext] Failed to create default config for visualizer '%s': %s",
+                        viz_type,
+                        exc,
                     )
             except Exception as exc:
                 logger.error(f"[SimulationContext] Failed to create default config for visualizer '{viz_type}': {exc}")
@@ -357,24 +399,75 @@ class SimulationContext:
 
     def _get_cli_visualizer_types(self) -> list[str]:
         """Return list of visualizer types requested via CLI (setting)."""
-        requested = self.get_setting("/isaaclab/visualizer")
-        if not requested:
+        requested = self.get_setting("/isaaclab/visualizer/types")
+        if not isinstance(requested, str) or not requested.strip():
             return []
-        parts = [p.strip() for p in requested.split(",") if p.strip()]
-        return [v for part in parts for v in part.split() if v]
+        # App launcher writes this as a single string; accept comma and/or whitespace separators.
+        return [value for chunk in requested.split(",") for value in chunk.split() if value]
+
+    def _get_cli_visualizer_max_worlds_override(self) -> tuple[bool, int | None]:
+        """Return CLI override for visualizer max worlds.
+
+        Returns:
+            Tuple of (has_override, value), where value=None means no override.
+        """
+        value = self.get_setting("/isaaclab/visualizer/max_worlds")
+        if value is None:
+            return False, None
+        try:
+            max_worlds = int(value)
+        except (TypeError, ValueError):
+            logger.warning("[SimulationContext] Invalid /isaaclab/visualizer/max_worlds setting: %r", value)
+            return False, None
+
+        # -1 means no CLI override.
+        if max_worlds < 0:
+            return False, None
+        return True, max_worlds
+
+    def _apply_visualizer_cli_overrides(self, visualizer_cfgs: list[Any]) -> None:
+        """Apply CLI visualizer overrides (e.g., max worlds) to resolved configs.
+
+        Args:
+            visualizer_cfgs: Resolved visualizer configs to update in-place.
+        """
+        has_max_worlds_override, max_worlds_override = self._get_cli_visualizer_max_worlds_override()
+        if not has_max_worlds_override:
+            return
+
+        for cfg in visualizer_cfgs:
+            if hasattr(cfg, "max_worlds"):
+                cfg.max_worlds = max_worlds_override
+
+    def _is_cli_visualizer_explicit(self) -> bool:
+        """Return ``True`` when visualizers were explicitly provided via CLI."""
+        return bool(self.get_setting("/isaaclab/visualizer/explicit"))
+
+    def _is_cli_visualizer_disable_all(self) -> bool:
+        """Return ``True`` when CLI requested ``--viz none`` semantics."""
+        return bool(self.get_setting("/isaaclab/visualizer/disable_all"))
 
     def resolve_visualizer_types(self) -> list[str]:
         """Resolve visualizer types from config or CLI settings."""
-        visualizer_cfgs = self.cfg.visualizer_cfgs
-        if visualizer_cfgs is None:
+        if self._is_cli_visualizer_disable_all():
+            return []
+        if self._is_cli_visualizer_explicit():
             return self._get_cli_visualizer_types()
 
+        visualizer_cfgs = self.cfg.visualizer_cfgs
+        if visualizer_cfgs is None:
+            return []
         if not isinstance(visualizer_cfgs, list):
             visualizer_cfgs = [visualizer_cfgs]
         return [cfg.visualizer_type for cfg in visualizer_cfgs if getattr(cfg, "visualizer_type", None)]
 
     def _resolve_visualizer_cfgs(self) -> list[Any]:
-        """Resolve final visualizer configs from cfg and optional CLI override."""
+        """Resolve final visualizer configs from cfg and optional CLI override.
+
+        When visualizers are explicitly requested via ``--visualizer`` CLI flag,
+        a :class:`RuntimeError` is raised if any requested type cannot be
+        resolved (unknown type or missing package).
+        """
         visualizer_cfgs: list[Any] = []
         if self.cfg.visualizer_cfgs is not None:
             visualizer_cfgs = (
@@ -382,21 +475,66 @@ class SimulationContext:
             )
 
         cli_requested = self._get_cli_visualizer_types()
-        if not visualizer_cfgs:
-            return self._create_default_visualizer_configs(cli_requested) if cli_requested else []
+        cli_explicit = self._is_cli_visualizer_explicit()
+        cli_disable_all = self._is_cli_visualizer_disable_all()
 
-        if not cli_requested:
-            return visualizer_cfgs
+        if cli_disable_all:
+            resolved = []
+        elif not cli_explicit:
+            self._apply_visualizer_cli_overrides(visualizer_cfgs)
+            resolved = visualizer_cfgs
+        elif not visualizer_cfgs:
+            resolved = self._create_default_visualizer_configs(cli_requested) if cli_requested else []
+            self._apply_visualizer_cli_overrides(resolved)
+        else:
+            # CLI selection is explicit: keep only requested cfg types, then add defaults for missing.
+            cli_requested_set = set(cli_requested)
+            resolved = [cfg for cfg in visualizer_cfgs if getattr(cfg, "visualizer_type", None) in cli_requested_set]
+            existing_types = {getattr(cfg, "visualizer_type", None) for cfg in resolved}
+            for viz_type in cli_requested:
+                if viz_type not in existing_types and viz_type in _VISUALIZER_TYPES:
+                    resolved.extend(self._create_default_visualizer_configs([viz_type]))
+                    existing_types.add(viz_type)
+            self._apply_visualizer_cli_overrides(resolved)
 
-        # CLI selection is explicit: keep only requested cfg types, then add defaults for missing requested types.
-        cli_requested_set = set(cli_requested)
-        selected_cfgs = [cfg for cfg in visualizer_cfgs if getattr(cfg, "visualizer_type", None) in cli_requested_set]
-        existing_types = {getattr(cfg, "visualizer_type", None) for cfg in selected_cfgs}
-        for viz_type in cli_requested:
-            if viz_type not in existing_types and viz_type in _VISUALIZER_TYPES:
-                selected_cfgs.extend(self._create_default_visualizer_configs([viz_type]))
-                existing_types.add(viz_type)
-        return selected_cfgs
+        # When visualizers were explicitly requested via CLI, verify all
+        # requested types were resolved.  This catches unknown types and
+        # missing packages that _create_default_visualizer_configs silently
+        # skips.
+        if cli_explicit and cli_requested:
+            resolved_types = {getattr(cfg, "visualizer_type", None) for cfg in resolved}
+            missing = [t for t in cli_requested if t not in resolved_types]
+            if missing:
+                raise RuntimeError(
+                    f"Explicitly requested visualizer(s) {missing} could not be configured. "
+                    f"Valid types: {', '.join(repr(t) for t in _VISUALIZER_TYPES)}. "
+                    "Ensure the required package is installed "
+                    "(e.g., pip install isaaclab_visualizers[<type>])."
+                )
+
+        # XR auto-start: auto-inject a KitVisualizer when XR is active and no
+        # Kit visualizer is already present.  The KitVisualizer pumps
+        # app.update() and triggers forward() (via requires_forward_before_step)
+        # to sync Fabric data so the XR runtime receives up-to-date hand/joint
+        # transforms each frame.
+        if self._xr_enabled and bool(self.get_setting("/isaaclab/xr/auto_start")):
+            has_kit = any(getattr(cfg, "visualizer_type", None) == "kit" for cfg in resolved)
+            if not has_kit:
+                try:
+                    import importlib
+
+                    mod = importlib.import_module("isaaclab_visualizers.kit")
+                    kit_cfg_cls = getattr(mod, "KitVisualizerCfg")
+                    resolved.append(kit_cfg_cls())
+                    logger.info("[SimulationContext] Auto-injecting KitVisualizer for XR app-update pumping.")
+                except (ImportError, ModuleNotFoundError, AttributeError) as exc:
+                    logger.warning(
+                        "[SimulationContext] XR mode could not auto-inject a KitVisualizer: %s. "
+                        "Install isaaclab_visualizers[kit] or pass --visualizer kit.",
+                        exc,
+                    )
+
+        return resolved
 
     def initialize_visualizers(self) -> None:
         """Initialize visualizers from SimulationCfg.visualizer_cfgs."""
@@ -410,7 +548,15 @@ class SimulationContext:
         if not visualizer_cfgs:
             return
 
-        self.initialize_scene_data_provider(visualizer_cfgs)
+        cli_explicit = self._is_cli_visualizer_explicit()
+
+        # Resolve visualizer-driven requirements once and keep optional artifact payload untouched.
+        visualizer_types = [
+            cfg.visualizer_type for cfg in visualizer_cfgs if getattr(cfg, "visualizer_type", None) is not None
+        ]
+        requirements = resolve_scene_data_requirements(visualizer_types=visualizer_types)
+        self._scene_data_requirements = requirements
+        self.initialize_scene_data_provider()
         self._visualizers = []
 
         for cfg in visualizer_cfgs:
@@ -418,9 +564,18 @@ class SimulationContext:
                 visualizer = cfg.create_visualizer()
                 visualizer.initialize(self._scene_data_provider)
                 self._visualizers.append(visualizer)
-                logger.info(f"Initialized visualizer: {type(visualizer).__name__} (type: {cfg.visualizer_type})")
             except Exception as exc:
-                logger.error(f"Failed to initialize visualizer '{cfg.visualizer_type}' ({type(cfg).__name__}): {exc}")
+                if cli_explicit:
+                    raise RuntimeError(
+                        f"Visualizer '{cfg.visualizer_type}' was explicitly requested "
+                        f"but failed to create or initialize: {exc}"
+                    ) from exc
+                logger.exception(
+                    "Failed to initialize visualizer '%s' (%s): %s",
+                    cfg.visualizer_type,
+                    type(cfg).__name__,
+                    exc,
+                )
 
         if not self._visualizers and self._scene_data_provider is not None:
             close_provider = getattr(self._scene_data_provider, "close", None)
@@ -428,20 +583,37 @@ class SimulationContext:
                 close_provider()
             self._scene_data_provider = None
 
-    def initialize_scene_data_provider(self, visualizer_cfgs: list[Any]) -> SceneDataProvider:
+    def initialize_scene_data_provider(self) -> BaseSceneDataProvider:
         if self._scene_data_provider is None:
-            if "newton" in self.physics_manager.__name__.lower():
-                from .scene_data_providers import NewtonSceneDataProvider
-
-                self._scene_data_provider = NewtonSceneDataProvider(visualizer_cfgs, self.stage, self)
-            else:
-                from .scene_data_providers import PhysxSceneDataProvider
-
-                self._scene_data_provider = PhysxSceneDataProvider(visualizer_cfgs, self.stage, self)
+            self._scene_data_provider = SceneDataProvider(self.stage, self)
         return self._scene_data_provider
 
+    def get_scene_data_requirements(self) -> SceneDataRequirement:
+        """Return scene-data requirements resolved from visualizers/renderers."""
+        return self._scene_data_requirements
+
+    def update_scene_data_requirements(self, requirements: SceneDataRequirement) -> None:
+        """Update scene-data requirements."""
+        self._scene_data_requirements = requirements
+
+    def get_scene_data_visualizer_prebuilt_artifact(self) -> VisualizerPrebuiltArtifacts | None:
+        """Return optional prebuilt visualizer artifact."""
+        return self._visualizer_prebuilt_artifact
+
+    def set_scene_data_visualizer_prebuilt_artifact(self, artifact: VisualizerPrebuiltArtifacts | None) -> None:
+        """Set or clear the optional visualizer prebuilt artifact.
+
+        The scene (clone flow) writes this once, and providers can read it
+        during initialization as a fast path.
+        """
+        self._visualizer_prebuilt_artifact = artifact
+
+    def clear_scene_data_visualizer_prebuilt_artifact(self) -> None:
+        """Clear optional prebuilt artifact in provider context."""
+        self.set_scene_data_visualizer_prebuilt_artifact(None)
+
     @property
-    def visualizers(self) -> list[Visualizer]:
+    def visualizers(self) -> list[BaseVisualizer]:
         """Returns the list of active visualizers."""
         return self._visualizers
 
@@ -514,15 +686,14 @@ class SimulationContext:
         visualizers_to_remove = []
         for viz in self._visualizers:
             try:
+                if viz.is_closed or not viz.is_running():
+                    if viz.is_closed:
+                        logger.info("Visualizer closed: %s", type(viz).__name__)
+                    else:
+                        logger.info("Visualizer not running: %s", type(viz).__name__)
+                    visualizers_to_remove.append(viz)
+                    continue
                 if viz.is_rendering_paused():
-                    continue
-                if viz.is_closed:
-                    logger.info("Visualizer closed: %s", type(viz).__name__)
-                    visualizers_to_remove.append(viz)
-                    continue
-                if not viz.is_running():
-                    logger.info("Visualizer not running: %s", type(viz).__name__)
-                    visualizers_to_remove.append(viz)
                     continue
                 while viz.is_training_paused() and viz.is_running():
                     viz.step(0.0)
@@ -605,9 +776,6 @@ class SimulationContext:
             # This must happen before clearing USD prims to avoid PhysX cleanup errors
             cls._instance.physics_manager.close()
 
-            # Now safe to clear stage contents (PhysX is detached)
-            cls.clear_stage()
-
             # Close all visualizers
             for viz in cls._instance._visualizers:
                 viz.close()
@@ -618,7 +786,8 @@ class SimulationContext:
                     close_provider()
                 cls._instance._scene_data_provider = None
 
-            # Close the stage (clears cache, thread-local context, and Kit USD context)
+            # Tear down the stage. We skip clear_stage() (prim-by-prim deletion) since
+            # close_stage() + app shutdown destroy the entire stage at once.
             stage_utils.close_stage()
 
             # Clear instance
@@ -658,6 +827,7 @@ def build_simulation_context(
     add_ground_plane: bool = False,
     add_lighting: bool = False,
     auto_add_lighting: bool = False,
+    visualizers: list[str] | None = None,
 ) -> Iterator[SimulationContext]:
     """Context manager to build a simulation context with the provided settings.
 
@@ -670,6 +840,10 @@ def build_simulation_context(
         add_ground_plane: Whether to add a ground plane. Defaults to False.
         add_lighting: Whether to add a dome light. Defaults to False.
         auto_add_lighting: Whether to auto-add lighting if GUI present. Defaults to False.
+        visualizers: List of visualizer backend keys to enable (e.g. ``["kit", "newton", "rerun"]``).
+            Valid types: ``"kit"``, ``"newton"``, ``"rerun"``, ``"viser"``.
+            When provided, sets the ``/isaaclab/visualizer/types`` setting so the
+            existing visualizer resolution machinery picks them up. Defaults to None.
 
     Yields:
         The simulation context to use for the simulation.
@@ -685,11 +859,14 @@ def build_simulation_context(
 
         sim = SimulationContext(sim_cfg)
 
+        if visualizers:
+            sim.set_setting("/isaaclab/visualizer/types", " ".join(visualizers))
+
         if add_ground_plane:
             cfg = GroundPlaneCfg()
             cfg.func("/World/defaultGroundPlane", cfg)
 
-        if add_lighting or (auto_add_lighting and sim.get_setting("/isaaclab/has_gui")):
+        if add_lighting or (auto_add_lighting and (sim.get_setting("/isaaclab/has_gui") or visualizers)):
             cfg = DomeLightCfg(
                 color=(0.1, 0.1, 0.1), enable_color_temperature=True, color_temperature=5500, intensity=10000
             )
