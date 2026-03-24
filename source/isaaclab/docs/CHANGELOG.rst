@@ -1,6 +1,18 @@
 Changelog
 ---------
 
+0.54.4 (2026-03-24)
+~~~~~~~~~~~~~~~~~~~
+
+Changed
+^^^^^^^
+
+* Cached :func:`~isaaclab.utils.string.string_to_callable` for
+  ``module:attribute`` references via ``functools.cache``, avoiding repeated
+  ``importlib.import_module`` calls when the same callable string is resolved
+  multiple times (e.g. across environment resets or multi-env setups).
+
+
 0.54.3 (2026-02-04)
 ~~~~~~~~~~~~~~~~~~~
 
