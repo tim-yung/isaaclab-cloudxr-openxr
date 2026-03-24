@@ -301,7 +301,7 @@ def _collect_test_files(
                 if filter_pattern and filter_pattern not in full_path:
                     print(f"Skipping {full_path} (does not match include pattern: {filter_pattern})")
                     continue
-                if exclude_pattern and exclude_pattern in full_path:
+                if exclude_pattern and any(pat.strip() in full_path for pat in exclude_pattern.split(",")):
                     print(f"Skipping {full_path} (matches exclude pattern: {exclude_pattern})")
                     continue
                 if include_files and file not in include_files:
