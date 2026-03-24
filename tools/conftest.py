@@ -310,7 +310,7 @@ def pytest_sessionstart(session):
                         continue
 
                     # Apply exclude filter
-                    if exclude_pattern and exclude_pattern in full_path:
+                    if exclude_pattern and any(pat.strip() in full_path for pat in exclude_pattern.split(",")):
                         print(f"Skipping {full_path} (matches exclude pattern: {exclude_pattern})")
                         continue
 
