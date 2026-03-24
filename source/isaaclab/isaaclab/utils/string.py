@@ -6,6 +6,7 @@
 """Sub-module containing utilities for transforming strings and regular expressions."""
 
 import ast
+import functools
 import importlib
 import inspect
 import re
@@ -99,8 +100,8 @@ def is_lambda_expression(name: str) -> bool:
         Whether the input string is a lambda expression.
     """
     try:
-        ast.parse(name)
-        return isinstance(ast.parse(name).body[0], ast.Expr) and isinstance(ast.parse(name).body[0].value, ast.Lambda)
+        tree = ast.parse(name)
+        return bool(tree.body) and isinstance(tree.body[0], ast.Expr) and isinstance(tree.body[0].value, ast.Lambda)
     except SyntaxError:
         return False
 
@@ -135,6 +136,22 @@ def callable_to_string(value: Callable) -> str:
         return f"{module_name}:{function_name}"
 
 
+@functools.cache
+def _resolve_module_callable(name: str) -> Callable:
+    """Resolve a ``module:attribute`` string to a callable, with caching.
+
+    This is the cached inner implementation used by :func:`string_to_callable`
+    for non-lambda references. Repeated lookups (e.g. across environment resets
+    or multi-env setups) skip the ``importlib`` overhead.
+    """
+    mod_name, attr_name = name.split(":")
+    mod = importlib.import_module(mod_name)
+    callable_object = getattr(mod, attr_name)
+    if callable(callable_object):
+        return callable_object
+    raise AttributeError(f"The imported object is not callable: '{name}'")
+
+
 def string_to_callable(name: str) -> Callable:
     """Resolves the module and function names to return the function.
 
@@ -152,16 +169,11 @@ def string_to_callable(name: str) -> Callable:
     try:
         if is_lambda_expression(name):
             callable_object = eval(name)
-        else:
-            mod_name, attr_name = name.split(":")
-            mod = importlib.import_module(mod_name)
-            callable_object = getattr(mod, attr_name)
-        # check if attribute is callable
-        if callable(callable_object):
-            return callable_object
-        else:
+            if callable(callable_object):
+                return callable_object
             raise AttributeError(f"The imported object is not callable: '{name}'")
-    except (ValueError, ModuleNotFoundError) as e:
+        return _resolve_module_callable(name)
+    except (ValueError, ModuleNotFoundError, AttributeError) as e:
         msg = (
             f"Could not resolve the input string '{name}' into callable object."
             " The format of input should be 'module:attribute_name'.\n"

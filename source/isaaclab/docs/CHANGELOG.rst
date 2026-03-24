@@ -1,6 +1,26 @@
 Changelog
 ---------
 
+4.5.23 (2026-03-24)
+~~~~~~~~~~~~~~~~~~~
+
+Fixed
+^^^^^
+
+* Fixed :func:`~isaaclab.utils.string.is_lambda_expression` calling
+  ``ast.parse()`` three times per invocation instead of once, eliminating
+  redundant work on every configclass deserialization that checks for
+  lambda expressions.
+
+Changed
+^^^^^^^
+
+* Cached :func:`~isaaclab.utils.string.string_to_callable` for
+  ``module:attribute`` references via ``functools.cache``, avoiding repeated
+  ``importlib.import_module`` calls when the same callable string is resolved
+  multiple times (e.g. across environment resets or multi-env setups).
+
+
 4.5.22 (2026-03-16)
 ~~~~~~~~~~~~~~~~~~~
 
