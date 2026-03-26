@@ -79,8 +79,28 @@ from robomimic.utils.log_utils import DataLogger, PrintLogger
 from torch.utils.data import DataLoader
 
 import isaaclab_tasks  # noqa: F401
-import isaaclab_tasks.manager_based.locomanipulation.pick_place  # noqa: F401
-import isaaclab_tasks.manager_based.manipulation.pick_place  # noqa: F401
+
+def _try_import_optional_task(module_path: str) -> None:
+    """Best-effort import for optional task packages.
+
+    Some task modules pull optional native dependencies (e.g. pinocchio / dex_retargeting)
+    that may be unavailable or ABI-incompatible in a given environment. These imports are
+    not required for standard Franka robomimic training.
+    """
+    try:
+        importlib.import_module(module_path)
+    except Exception as exc:
+        # Do not stringify `exc`: some binary-import failures trigger nested exceptions during formatting.
+        print(f"[WARN] Skipping optional task module '{module_path}' ({type(exc).__name__}).")
+
+
+def _maybe_import_optional_tasks_for_task(task_name: str) -> None:
+    """Import heavyweight optional task packages only for tasks that need them."""
+    need_humanoid_optional_stack = any(tag in task_name for tag in ("G1", "Locomanipulation", "Humanoid"))
+    if not need_humanoid_optional_stack:
+        return
+    _try_import_optional_task("isaaclab_tasks.manager_based.locomanipulation.pick_place")
+    _try_import_optional_task("isaaclab_tasks.manager_based.manipulation.pick_place")
 
 
 def normalize_hdf5_actions(config: Config, log_dir: str) -> str:
@@ -352,6 +372,7 @@ def main(args: argparse.Namespace):
         # obtain the configuration entry point
         cfg_entry_point_key = f"robomimic_{args.algo}_cfg_entry_point"
         task_name = args.task.split(":")[-1]
+        _maybe_import_optional_tasks_for_task(task_name)
 
         print(f"Loading configuration for task: {task_name}")
         print(gym.envs.registry.keys())
