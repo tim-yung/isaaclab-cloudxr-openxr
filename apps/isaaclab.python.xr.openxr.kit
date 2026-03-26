@@ -39,9 +39,18 @@ xr.skipInputDeviceUSDWrites = true
 [dependencies]
 "isaaclab.python" = {}
 
-# Kit extensions
+# Kit extensions (Isaac Sim 6+ ships OpenXR + core in extscache; omni.kit.xr.profile.ar is not
+# bundled with Sim 6 and is absent from the public kit-extensions-registry air-gap mirror.)
+"omni.kit.xr.core" = {}
 "omni.kit.xr.system.openxr" = {}
-"omni.kit.xr.profile.ar" = {}
+# XR profile window: in-app menus to pick OpenXR runtime and Start/Stop session (needed for CloudXR).
+"omni.kit.xr.ui.window.profile" = {}
+
+# Local NGC kit-extensions-registry mirror (append so Isaac Lab's default registries stay intact).
+[settings.exts."omni.kit.registry.nucleus".registries]
+++ = [
+    { name = "kit/airgap-local", url = "/home/ubuntu/omniverse-airgap/kit-extensions-registry-unpacked" },
+]
 
 [settings.isaaclab]
 # This is used to check that this experience file is loaded when using cameras
@@ -52,8 +61,8 @@ app.xr.enabled = true
 # Set profiler backend to NVTX by default
 app.profilerBackend = "nvtx"
 
-# xr settings
-xr.ui.enabled = false
+# xr settings (must be true or Kit hides XR runtime / Start Session UI; CloudXR needs that flow on the host)
+xr.ui.enabled = true
 xr.depth.aov = "GBufferDepth"
 defaults.xr.profile.ar.anchorMode = "custom anchor"
 rtx.rendermode = "RaytracedLighting"

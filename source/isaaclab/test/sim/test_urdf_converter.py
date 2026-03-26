@@ -16,15 +16,12 @@ import os
 
 import numpy as np
 import pytest
-from packaging.version import Version
-
-import omni.kit.app
 from isaacsim.core.prims import Articulation
 
 import isaaclab.sim as sim_utils
 from isaaclab.sim import SimulationCfg, SimulationContext
 from isaaclab.sim.converters import UrdfConverter, UrdfConverterCfg
-from isaaclab.utils.version import get_isaac_sim_version
+from isaaclab.sim.converters.urdf_converter import get_isaacsim_urdf_importer_extension_path
 
 
 # Create a fixture for setup and teardown
@@ -32,16 +29,7 @@ from isaaclab.utils.version import get_isaac_sim_version
 def sim_config():
     # Create a new stage
     sim_utils.create_new_stage()
-    # pin the urdf importer extension to the older version
-    manager = omni.kit.app.get_app().get_extension_manager()
-    if get_isaac_sim_version() >= Version("5.1"):
-        pinned_urdf_extension_name = "isaacsim.asset.importer.urdf-2.4.31"
-        manager.set_extension_enabled_immediate(pinned_urdf_extension_name, True)
-    else:
-        pinned_urdf_extension_name = "isaacsim.asset.importer.urdf"
-    # obtain the extension path
-    extension_id = manager.get_enabled_extension_id(pinned_urdf_extension_name)
-    extension_path = manager.get_extension_path(extension_id)
+    extension_path = get_isaacsim_urdf_importer_extension_path()
     # default configuration
     config = UrdfConverterCfg(
         asset_path=f"{extension_path}/data/urdf/robots/franka_description/robots/panda_arm_hand.urdf",

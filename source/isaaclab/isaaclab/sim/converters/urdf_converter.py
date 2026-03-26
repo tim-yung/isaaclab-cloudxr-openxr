@@ -23,6 +23,25 @@ if TYPE_CHECKING:
     import isaacsim.asset.importer.urdf
 
 
+def get_isaacsim_urdf_importer_extension_path() -> str:
+    """Return the filesystem root of the enabled ``isaacsim.asset.importer.urdf`` extension.
+
+    Isaac Sim 6+ bundles URDF importer 3.x; 5.1–5.x may pin 2.4.31 for legacy fixed-joint merge behavior.
+    """
+    manager = omni.kit.app.get_app().get_extension_manager()
+    ver = get_isaac_sim_version()
+    if ver.major >= 6:
+        ext_key = "isaacsim.asset.importer.urdf"
+    elif ver >= Version("5.1"):
+        ext_key = "isaacsim.asset.importer.urdf-2.4.31"
+        if not manager.is_extension_enabled(ext_key):
+            manager.set_extension_enabled_immediate(ext_key, True)
+    else:
+        ext_key = "isaacsim.asset.importer.urdf"
+    ext_id = manager.get_enabled_extension_id(ext_key)
+    return manager.get_extension_path(ext_id)
+
+
 class UrdfConverter(AssetConverterBase):
     """Converter for a URDF description file to a USD file.
 
@@ -45,9 +64,9 @@ class UrdfConverter(AssetConverterBase):
         entries specify mass and inertia, even if ``merge-joint`` is set to True. The new behavior
         treats links with mass/inertia as full bodies rather than zero-mass reference frames.
 
-        To maintain backwards compatibility, **this converter pins to an older version of the
-        URDF importer extension** (version 2.4.31) that still merges fixed joints by default.
-        This allows existing URDFs to work as expected without modification.
+        On **Isaac Sim 5.1–5.x**, this converter enables URDF importer **2.4.31** at runtime so
+        fixed joints still merge like older releases. **Isaac Sim 6+** uses the shipped 3.x importer
+        only (no 2.4.31 build).
 
     .. _isaacsim.asset.importer.urdf: https://docs.isaacsim.omniverse.nvidia.com/latest/importer_exporter/ext_isaacsim_asset_importer_urdf.html
     """
@@ -61,11 +80,13 @@ class UrdfConverter(AssetConverterBase):
         Args:
             cfg: The configuration instance for URDF to USD conversion.
         """
-        # switch to older version of the URDF importer extension
-        if get_isaac_sim_version() >= Version("5.1"):
+        # Isaac Sim 5.1–5.x: enable legacy 2.4.31 importer for fixed-joint merge defaults.
+        _ver = get_isaac_sim_version()
+        if _ver >= Version("5.1") and _ver.major < 6:
             manager = omni.kit.app.get_app().get_extension_manager()
-            if not manager.is_extension_enabled("isaacsim.asset.importer.urdf-2.4.31"):
-                manager.set_extension_enabled_immediate("isaacsim.asset.importer.urdf-2.4.31", True)
+            legacy = "isaacsim.asset.importer.urdf-2.4.31"
+            if not manager.is_extension_enabled(legacy):
+                manager.set_extension_enabled_immediate(legacy, True)
 
         # acquire the URDF interface
         from isaacsim.asset.importer.urdf._urdf import acquire_urdf_interface
