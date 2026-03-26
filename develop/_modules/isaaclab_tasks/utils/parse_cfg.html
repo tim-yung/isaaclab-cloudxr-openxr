@@ -60,7 +60,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   <meta name="docsearch:version" content="3.0.0" />
-    <meta name="docbuild:last-update" content="Mar 25, 2026"/>
+    <meta name="docbuild:last-update" content="Mar 26, 2026"/>
   </head>
   
   
@@ -715,6 +715,9 @@
     <span class="k">return</span> <span class="n">cfg</span>
 
 
+<span class="c1"># TODO: The nested-preset resolution logic in apply_named_preset (and related helpers)</span>
+<span class="c1"># should be unified with the deep-nesting fixes in https://github.com/isaac-sim/IsaacLab/pull/5029</span>
+<span class="c1"># (isaaclab_tasks.utils.hydra), which properly handles deeply nested PresetCfg discovery.</span>
 <span class="k">def</span><span class="w"> </span><span class="nf">apply_named_preset</span><span class="p">(</span><span class="n">env_cfg</span><span class="p">:</span> <span class="nb">object</span><span class="p">,</span> <span class="n">raw_cfg</span><span class="p">:</span> <span class="nb">object</span><span class="p">,</span> <span class="n">preset_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Apply a named preset to all preset-wrapper fields in *env_cfg*, guided by *raw_cfg*.</span>
 
@@ -1031,7 +1034,7 @@ By The Isaac Lab Project Developers.
   
   <div class="footer-item">
     <p class="last-updated">
-  Last updated on Mar 25, 2026.
+  Last updated on Mar 26, 2026.
   <br/>
 </p>
   </div>
