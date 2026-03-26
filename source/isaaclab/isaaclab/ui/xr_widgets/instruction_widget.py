@@ -10,11 +10,19 @@ from typing import Any, TypeAlias
 
 import omni.kit.commands
 import omni.ui as ui
-from omni.kit.xr.scene_view.utils import UiContainer, WidgetComponent
-from omni.kit.xr.scene_view.utils.spatial_source import SpatialSource
 from pxr import Gf
 
 import isaaclab.sim as sim_utils
+
+try:
+    # Newer Kit namespace (Sim 6+).
+    from omni.kit.scene_view.xr_utils import SpatialSource, UiContainer, WidgetComponent
+    from omni.kit.scene_view.xr import XRSceneView
+except ModuleNotFoundError:
+    # Legacy namespace (older Sim/Kit builds).
+    from omni.kit.xr.scene_view.utils import UiContainer, WidgetComponent
+    from omni.kit.xr.scene_view.utils.spatial_source import SpatialSource
+    XRSceneView = None
 
 Vec3Type: TypeAlias = Gf.Vec3f | Gf.Vec3d
 
@@ -204,10 +212,19 @@ def show_instruction(
     )
 
     # Create the UI container with the widget.
-    container = UiContainer(
-        widget_component,
-        space_stack=space_stack,
-    )
+    # Sim 6+ API expects (scene_view_type, initial_component, ...), while older API expects
+    # (initial_component, ...). Support both to keep backward compatibility.
+    if XRSceneView is not None:
+        container = UiContainer(
+            XRSceneView,
+            widget_component,
+            space_stack=space_stack,
+        )
+    else:
+        container = UiContainer(
+            widget_component,
+            space_stack=space_stack,
+        )
     camera_facing_widget_container[target_prim_path] = (container, text)
 
     # Schedule auto-hide after the specified display_duration if provided.
